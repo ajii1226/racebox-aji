@@ -1,0 +1,163 @@
+<!DOCTYPE html>
+<html lang="id">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>GPS Lap Timer</title>
+<style>
+    body { font-family: Arial, sans-serif; text-align: center; background: #f0f0f0; }
+    h1 { color: #333; }
+    table { margin: auto; border-collapse: collapse; width: 90%; background: #fff; }
+    th, td { padding: 8px; border: 1px solid #ccc; }
+    th { background: #ddd; }
+    button { padding: 10px 20px; margin: 10px; font-size: 16px; cursor: pointer; }
+    .info { font-size: 18px; margin: 10px 0; }
+</style>
+</head>
+<body>
+<h1>GPS Lap Timer</h1>
+<p id="status">Menunggu GPS...</p>
+<p class="info">Kecepatan: <span id="speed">0</span> km/jam</p>
+<p class="info">Estimasi Finish 1000m: <span id="eta">-</span></p>
+
+<button onclick="startTracking()">Mulai</button>
+<button onclick="stopTracking()">Stop</button>
+<button onclick="downloadCSV()">Download CSV</button>
+
+<table>
+    <thead>
+        <tr>
+            <th>Jarak (m)</th>
+            <th>Waktu (detik)</th>
+        </tr>
+    </thead>
+    <tbody id="lapTable">
+    </tbody>
+</table>
+
+<script>
+let watchID;
+let startTime;
+let lastLat = null;
+let lastLon = null;
+let totalDistance = 0;
+let checkpoints = [100, 205, 800, 1000];
+let passedCheckpoints = {};
+let dataLog = [];
+let avgSpeed = 0;
+
+function startTracking() {
+    startTime = Date.now();
+    totalDistance = 0;
+    passedCheckpoints = {};
+    dataLog = [];
+    lastLat = null;
+    lastLon = null;
+    avgSpeed = 0;
+    document.getElementById("lapTable").innerHTML = "";
+    document.getElementById("status").innerText = "Tracking dimulai...";
+    document.getElementById("speed").innerText = "0";
+    document.getElementById("eta").innerText = "-";
+
+    if ("geolocation" in navigator) {
+        watchID = navigator.geolocation.watchPosition(success, error, { enableHighAccuracy: true, maximumAge: 0, timeout: 5000 });
+    } else {
+        alert("GPS tidak didukung di perangkat ini.");
+    }
+}
+
+function stopTracking() {
+    navigator.geolocation.clearWatch(watchID);
+    document.getElementById("status").innerText = "Tracking dihentikan.";
+}
+
+function success(position) {
+    let lat = position.coords.latitude;
+    let lon = position.coords.longitude;
+    let speedMs = position.coords.speed; // m/s
+    let currentTime = (Date.now() - startTime) / 1000; // detik
+
+    if (speedMs !== null && !isNaN(speedMs)) {
+        let speedKmh = (speedMs * 3.6).toFixed(2);
+        document.getElementById("speed").innerText = speedKmh;
+        if (speedKmh > 0) {
+            avgSpeed = speedMs; // m/s
+        }
+    }
+
+    if (lastLat !== null && lastLon !== null) {
+        let dist = getDistanceFromLatLonInMeters(lastLat, lastLon, lat, lon);
+        totalDistance += dist;
+
+        checkpoints.forEach(cp => {
+            if (!passedCheckpoints[cp] && totalDistance >= cp) {
+                let waktu = currentTime.toFixed(2);
+                document.getElementById("lapTable").innerHTML += `<tr><td>${cp}</td><td>${waktu}</td></tr>`;
+                passedCheckpoints[cp] = true;
+                dataLog.push({ jarak: cp, waktu: waktu });
+            }
+        });
+
+        // ETA (Estimasi Waktu Finish 1000m)
+        if (avgSpeed > 0 && totalDistance < 1000) {
+            let sisaJarak = 1000 - totalDistance;
+            let etaDetik = sisaJarak / avgSpeed;
+            document.getElementById("eta").innerText = formatTime(etaDetik);
+        } else if (totalDistance >= 1000) {
+            document.getElementById("eta").innerText = "Finish";
+        }
+    }
+
+    lastLat = lat;
+    lastLon = lon;
+    document.getElementById("status").innerText = `Jarak: ${totalDistance.toFixed(2)} m`;
+}
+
+function error(err) {
+    console.warn(`ERROR(${err.code}): ${err.message}`);
+}
+
+function getDistanceFromLatLonInMeters(lat1, lon1, lat2, lon2) {
+    let R = 6371000; // meter
+    let dLat = deg2rad(lat2 - lat1);
+    let dLon = deg2rad(lon2 - lon1);
+    let a =
+        Math.sin(dLat / 2) * Math.sin(dLat / 2) +
+        Math.cos(deg2rad(lat1)) * Math.cos(deg2rad(lat2)) *
+        Math.sin(dLon / 2) * Math.sin(dLon / 2);
+    let c = 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a));
+    let d = R * c;
+    return d;
+}
+
+function deg2rad(deg) {
+    return deg * (Math.PI / 180);
+}
+
+function formatTime(seconds) {
+    let m = Math.floor(seconds / 60);
+    let s = Math.floor(seconds % 60);
+    return `${m}m ${s}s`;
+}
+
+function downloadCSV() {
+    if (dataLog.length === 0) {
+        alert("Belum ada data untuk diunduh!");
+        return;
+    }
+    let csvContent = "data:text/csv;charset=utf-8,Jarak (m),Waktu (detik)
+";
+    dataLog.forEach(row => {
+        csvContent += `${row.jarak},${row.waktu}
+";
+    });
+    let encodedUri = encodeURI(csvContent);
+    let link = document.createElement("a");
+    link.setAttribute("href", encodedUri);
+    link.setAttribute("download", "lap_timer.csv");
+    document.body.appendChild(link);
+    link.click();
+}
+</script>
+</body>
+</html>
